@@ -46,4 +46,9 @@ export interface AdminStats {
   storage_used?: number;
 }
 
-export type AppContext = Context<{ Bindings: Env }>;
+export type AppContext = Context<{ 
+  Bindings: Env;
+  Variables: {
+    user?: any;
+  };
+}>;

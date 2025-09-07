@@ -164,11 +164,12 @@ export class R2Storage implements R2Bucket {
         consumed = true;
         
         if (!buffer) {
-          const filePath = this.getFilePath(key);
+          const filePath = (this as any).getFilePath(key);
           buffer = await fs.readFile(filePath);
         }
         
-        return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
+        const arrayBuffer = buffer.buffer as ArrayBuffer;
+        return arrayBuffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
       },
       
       async text(): Promise<string> {
@@ -176,7 +177,7 @@ export class R2Storage implements R2Bucket {
         consumed = true;
         
         if (!buffer) {
-          const filePath = this.getFilePath(key);
+          const filePath = (this as any).getFilePath(key);
           buffer = await fs.readFile(filePath);
         }
         

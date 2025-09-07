@@ -1,27 +1,67 @@
+# Dependencies
 node_modules/
+
+# Build outputs
 dist/
+build/
+*.js.map
+
+# Cloudflare Workers
 .wrangler/
 .dev.vars*
-.env*
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Logs
 *.log
+logs/
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Data directories
+data/
+storage/
+backups/
+
+# Cache
+.cache/
+*.tmp
+tmp/
+temp/
+
+# OS files
 .DS_Store
-
-# Claude files
-.claude/
-
-# Deployment documentation
-DEPLOYMENT.md
-
-# Wrangler backup
-wrangler.toml.bak
+Thumbs.db
+desktop.ini
+*~
 
 # IDE files
 .vscode/
 .idea/
 *.swp
 *.swo
-*~
 
-# OS files
-Thumbs.db
-desktop.ini
+# Claude files
+.claude/
+CLAUDE.md
+
+# Deployment files
+DEPLOYMENT.md
+wrangler.toml.bak
+
+# SSL certificates and keys
+*.pem
+*.key
+*.crt
+*.p12
+ssl/
+
+# Backup files
+*.bak
+*~

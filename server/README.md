@@ -155,6 +155,213 @@ server/
 
 ## 🚀 生产部署
 
+### 🐳 Docker 部署（推荐）
+
+#### Docker 部署步骤
+
+请按照以下步骤手动部署：
+
+##### 1. 准备环境变量
+
+```bash
+# 复制环境变量示例文件
+cp .env.example .env
+
+# 编辑 .env 文件，修改以下重要配置
+nano .env
+```
+
+必须修改的配置：
+- `JWT_SECRET` - 生成随机密钥：`openssl rand -base64 32`
+- `ADMIN_PASSWORD` - 设置强管理员密码
+
+##### 2. 构建 Docker 镜像
+
+```bash
+# 构建镜像
+docker build -t cloudnote-server:latest .
+
+# 或使用 docker-compose 构建
+docker-compose build
+```
+
+##### 3. 创建必要的目录
+
+```bash
+# 创建数据和存储目录
+mkdir -p data storage backups
+
+# 设置权限（Linux/macOS）
+chmod 755 data storage backups
+```
+
+##### 4. 启动容器
+
+**方式一：使用 docker run**
+
+```bash
+docker run -d \
+  --name cloudnote-server \
+  -p 3000:3000 \
+  -v $(pwd)/data:/app/data \
+  -v $(pwd)/storage:/app/storage \
+  -v $(pwd)/.env:/app/.env:ro \
+  --restart unless-stopped \
+  cloudnote-server:latest
+```
+
+**方式二：使用 docker-compose（推荐）**
+
+```bash
+# 启动服务
+docker-compose up -d
+
+# 查看日志
+docker-compose logs -f
+
+# 停止服务
+docker-compose down
+
+# 重启服务
+docker-compose restart
+```
+
+##### 5. 配置 Nginx 反向代理（可选）
+
+如果需要 Nginx 反向代理，创建 `nginx.conf`：
+
+```nginx
+events {
+    worker_connections 1024;
+}
+
+http {
+    upstream cloudnote {
+        server cloudnote:3000;
+    }
+
+    server {
+        listen 80;
+        server_name your-domain.com;
+
+        client_max_body_size 50M;
+
+        location / {
+            proxy_pass http://cloudnote;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection 'upgrade';
+            proxy_set_header Host $host;
+            proxy_cache_bypass $http_upgrade;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+    }
+}
+```
+
+然后使用带 Nginx 的配置启动：
+
+```bash
+# 启动带 Nginx 的服务
+docker-compose --profile with-nginx up -d
+```
+
+##### 6. 配置自动备份（可选）
+
+启用自动备份服务：
+
+```bash
+# 启动带备份的服务
+docker-compose --profile with-backup up -d
+
+# 手动执行备份
+docker-compose exec cloudnote tar -czf /backups/manual_backup_$(date +%Y%m%d_%H%M%S).tar.gz /app/data /app/storage
+
+# 查看备份文件
+ls -la backups/
+```
+
+#### Docker 管理命令
+
+```bash
+# 查看容器状态
+docker-compose ps
+
+# 查看实时日志
+docker-compose logs -f cloudnote
+
+# 进入容器内部
+docker-compose exec cloudnote sh
+
+# 查看容器资源使用
+docker stats cloudnote-server
+
+# 更新镜像并重启
+docker-compose pull
+docker-compose up -d --build
+
+# 清理未使用的镜像
+docker image prune -a
+
+# 备份数据
+docker-compose exec cloudnote tar -czf /tmp/backup.tar.gz /app/data /app/storage
+docker cp cloudnote-server:/tmp/backup.tar.gz ./backup_$(date +%Y%m%d).tar.gz
+
+# 恢复数据
+docker cp backup.tar.gz cloudnote-server:/tmp/
+docker-compose exec cloudnote tar -xzf /tmp/backup.tar.gz -C /
+```
+
+#### Docker 环境变量说明
+
+在 `.env` 文件中配置：
+
+| 变量名 | 说明 | 默认值 |
+|--------|------|--------|
+| `PORT` | 容器内部端口 | 3000 |
+| `HOST` | 监听地址 | 0.0.0.0 |
+| `NODE_ENV` | 运行环境 | production |
+| `DATABASE_PATH` | 数据库路径 | ./data/cloudnote.db |
+| `STORAGE_PATH` | 存储路径 | ./storage |
+| `JWT_SECRET` | JWT 密钥 | 必须修改 |
+| `ADMIN_PASSWORD` | 管理员密码 | 必须修改 |
+
+#### Docker 部署故障排除
+
+**容器无法启动：**
+```bash
+# 查看详细错误日志
+docker-compose logs cloudnote
+
+# 检查端口占用
+netstat -tulpn | grep 3000
+
+# 检查 Docker 状态
+docker system df
+docker system prune
+```
+
+**权限问题：**
+```bash
+# Linux 系统修复权限
+sudo chown -R 1001:1001 data storage
+chmod 755 data storage
+```
+
+**网络问题：**
+```bash
+# 检查 Docker 网络
+docker network ls
+docker network inspect cloudnote_cloudnote-network
+
+# 重建网络
+docker-compose down
+docker network prune
+docker-compose up -d
+```
+
 ### 使用 PM2
 
 ```bash
@@ -175,63 +382,6 @@ pm2 save
 pm2 logs cloudnote-server
 ```
 
-### 使用 Docker
-
-创建 `Dockerfile`：
-
-```dockerfile
-FROM node:18-alpine
-
-WORKDIR /app
-
-COPY package*.json ./
-RUN npm ci --only=production
-
-COPY . .
-RUN npm run build
-
-EXPOSE 3000
-
-CMD ["node", "dist/index.js"]
-```
-
-构建并运行：
-
-```bash
-docker build -t cloudnote-server .
-docker run -d -p 3000:3000 \
-  -v ./data:/app/data \
-  -v ./storage:/app/storage \
-  --name cloudnote \
-  cloudnote-server
-```
-
-### 使用 Docker Compose
-
-创建 `docker-compose.yml`：
-
-```yaml
-version: '3.8'
-
-services:
-  cloudnote:
-    build: .
-    ports:
-      - "3000:3000"
-    volumes:
-      - ./data:/app/data
-      - ./storage:/app/storage
-      - ./.env:/app/.env
-    restart: unless-stopped
-    environment:
-      NODE_ENV: production
-```
-
-启动：
-
-```bash
-docker-compose up -d
-```
 
 ### 使用 Systemd (Linux)
 

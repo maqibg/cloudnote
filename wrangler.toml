@@ -1,4 +1,4 @@
-name = "cloudnote-test"
+name = "cloudnote"
 main = "src/index.ts"
 compatibility_date = "2025-09-06"
 compatibility_flags = ["nodejs_compat"]
@@ -13,18 +13,18 @@ SESSION_DURATION = "86400"
 # D1 数据库绑定
 [[d1_databases]]
 binding = "DB"
-database_name = "cloudnote-db-test"
-database_id = ""
+database_name = "cloudnote-db"
+database_id = "YOUR_DATABASE_ID"
 
 # KV 命名空间绑定
 [[kv_namespaces]]
 binding = "CACHE"
-id = ""
+id = "YOUR_KV_NAMESPACE_ID"
 
 # R2 存储桶绑定
 [[r2_buckets]]
 binding = "STORAGE"
-bucket_name = "cloudnote-storage-test"
+bucket_name = "cloudnote-storage"
 
 # 开发环境配置
 [env.development]

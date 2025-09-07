@@ -37,9 +37,16 @@ const env = {
   DB: db,
   CACHE: cache,
   STORAGE: storage,
-  JWT_SECRET: process.env.JWT_SECRET || 'change-this-secret',
+  JWT_SECRET: process.env.JWT_SECRET || (() => {
+    console.error('⚠️  JWT_SECRET not set! Please set JWT_SECRET environment variable.');
+    console.error('⚠️  Generate a secret key with: openssl rand -base64 32');
+    process.exit(1);
+  })(),
   ADMIN_USER: process.env.ADMIN_USER || 'admin',
-  ADMIN_PASSWORD: process.env.ADMIN_PASSWORD || 'admin',
+  ADMIN_PASSWORD: process.env.ADMIN_PASSWORD || (() => {
+    console.error('⚠️  ADMIN_PASSWORD not set! Please set ADMIN_PASSWORD environment variable.');
+    process.exit(1);
+  })(),
   PATH_MIN_LENGTH: process.env.PATH_MIN_LENGTH || '1',
   PATH_MAX_LENGTH: process.env.PATH_MAX_LENGTH || '20',
   RATE_LIMIT_PER_MINUTE: process.env.RATE_LIMIT_PER_MINUTE || '60',
@@ -70,11 +77,7 @@ app.route('/', noteRoutes);
 
 // 健康检查
 app.get('/health', (c) => {
-  return c.json({
-    status: 'healthy',
-    timestamp: new Date().toISOString(),
-    version: '1.0.0'
-  });
+  return c.text('healthy\n', 200);
 });
 
 // 404 处理
@@ -90,7 +93,7 @@ app.onError((err, c) => {
 
 // 启动服务器
 const port = parseInt(process.env.PORT || '3000');
-const host = process.env.HOST || 'localhost';
+const host = process.env.HOST || '0.0.0.0';
 
 console.log(`
 ╔═══════════════════════════════════════╗
