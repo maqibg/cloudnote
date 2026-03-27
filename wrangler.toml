@@ -1,6 +1,6 @@
 name = "cloudnote"
 main = "src/index.ts"
-compatibility_date = "2025-09-06"
+compatibility_date = "2026-03-28"
 compatibility_flags = ["nodejs_compat"]
 
 # 环境变量
@@ -10,26 +10,16 @@ PATH_MAX_LENGTH = "20"
 RATE_LIMIT_PER_MINUTE = "60"
 SESSION_DURATION = "86400"
 
-# D1 数据库绑定
+# D1 数据库绑定（Deploy Button 会自动创建并填充 database_id）
 [[d1_databases]]
 binding = "DB"
 database_name = "cloudnote-db"
-database_id = "YOUR_DATABASE_ID"
 
-# KV 命名空间绑定
+# KV 命名空间绑定（Deploy Button 会自动创建并填充 id）
 [[kv_namespaces]]
 binding = "CACHE"
-id = "YOUR_KV_NAMESPACE_ID"
 
-# R2 存储桶绑定
+# R2 存储桶绑定（Deploy Button 会自动创建）
 [[r2_buckets]]
 binding = "STORAGE"
 bucket_name = "cloudnote-storage"
-
-# 开发环境配置
-[env.development]
-vars = { }
-
-# 生产环境配置
-[env.production]
-vars = { }

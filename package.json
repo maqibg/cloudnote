@@ -5,7 +5,8 @@
   "main": "src/index.ts",
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "deploy": "npm run db:init && wrangler deploy",
+    "db:init": "wrangler d1 execute DB --file=./schema.sql --remote",
     "test": "vitest",
     "format": "prettier --write ."
   },
@@ -23,5 +24,18 @@
   },
   "engines": {
     "node": ">=18"
+  },
+  "cloudflare": {
+    "bindings": {
+      "ADMIN_USERNAME": {
+        "description": "管理员用户名（默认: admin）"
+      },
+      "ADMIN_PASSWORD": {
+        "description": "管理员密码（必须设置强密码）"
+      },
+      "JWT_SECRET": {
+        "description": "JWT 签名密钥（可使用命令生成: node -e \"console.log(require('crypto').randomBytes(32).toString('base64'))\"）"
+      }
+    }
   }
 }
