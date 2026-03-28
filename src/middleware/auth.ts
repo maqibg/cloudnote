@@ -1,8 +1,8 @@
 import { Context } from 'hono';
-import type { Bindings } from '../types';
+import type { AppEnv } from '../types';
 import { extractToken, verifyJWT } from '../utils/jwt';
 
-export async function requireAuth(c: Context<{ Bindings: Bindings }>, next: Function) {
+export async function requireAuth(c: Context<AppEnv>, next: Function) {
   const authorization = c.req.header('Authorization');
   const token = extractToken(authorization);
   

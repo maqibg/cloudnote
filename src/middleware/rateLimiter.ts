@@ -1,10 +1,11 @@
 import { Context } from 'hono';
-import type { Bindings } from '../types';
+import { getRateLimitPerMinute } from '../config';
+import type { AppEnv } from '../types';
 
 const RATE_LIMIT_PREFIX = 'ratelimit:';
 
 export function rateLimiter() {
-  return async (c: Context<{ Bindings: Bindings }>, next: Function) => {
+  return async (c: Context<AppEnv>, next: Function) => {
     // 优化1：只对写操作进行速率限制（GET和HEAD请求直接放行）
     if (c.req.method === 'GET' || c.req.method === 'HEAD' || c.req.method === 'OPTIONS') {
       return next();
@@ -15,6 +16,7 @@ export function rateLimiter() {
       '/api/note/',     // 笔记保存API
       '/api/admin/',    // 管理API
       '/admin/api/',    // 管理后台API
+      '/admin/',        // 兼容后台别名和登录
     ];
     
     // 检查当前路径是否需要速率限制
@@ -33,12 +35,13 @@ export function rateLimiter() {
                'unknown';
     
     const key = `${RATE_LIMIT_PREFIX}${ip}`;
-    const limit = parseInt(c.env.RATE_LIMIT_PER_MINUTE || '60');
+    const limit = getRateLimitPerMinute(c.env);
     
     try {
       // 检查当前请求计数
       const current = await c.env.CACHE.get(key);
-      const count = current ? parseInt(current) : 0;
+      const parsedCount = current ? Number.parseInt(current, 10) : 0;
+      const count = Number.isFinite(parsedCount) ? parsedCount : 0;
       
       // 如果超过限制，返回429错误
       if (count >= limit) {

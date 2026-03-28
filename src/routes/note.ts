@@ -1,71 +1,39 @@
 import { Hono } from 'hono';
-import type { Bindings } from '../types';
+import type { AppEnv } from '../types';
+import { QUILL_SNOW_CSS } from '../vendor/quillSnowCss';
+import {
+  isReservedPath,
+  isRenderablePath,
+  resolveRootPath,
+} from '../services/notes';
 
-const notes = new Hono<{ Bindings: Bindings }>();
+const notes = new Hono<AppEnv>();
 
-// 处理根路径 - 自动重定向到空白笔记或生成新路径
 notes.get('/', async (c) => {
   try {
-    // 查找第一个空白笔记
-    const emptyNote = await c.env.DB.prepare(
-      `SELECT path FROM notes 
-       WHERE content = '' OR content IS NULL 
-       ORDER BY created_at DESC 
-       LIMIT 1`
-    ).first<{ path: string }>();
-    
-    if (emptyNote) {
-      return c.redirect(`/${emptyNote.path}`);
+    const result = await resolveRootPath(c.env);
+    if ('path' in result.body) {
+      return c.redirect(`/${result.body.path}`);
     }
-    
-    // 生成新路径
-    const minLength = parseInt(c.env.PATH_MIN_LENGTH || '1');
-    const maxLength = parseInt(c.env.PATH_MAX_LENGTH || '4');
-    const length = Math.floor(Math.random() * (maxLength - minLength + 1)) + minLength;
-    
-    const { generateRandomPath } = await import('../utils/crypto');
-    
-    let attempts = 0;
-    let newPath: string;
-    
-    do {
-      newPath = generateRandomPath(length);
-      const existing = await c.env.DB.prepare(
-        'SELECT 1 FROM notes WHERE path = ?'
-      ).bind(newPath).first();
-      
-      if (!existing) {
-        return c.redirect(`/${newPath}`);
-      }
-      
-      attempts++;
-    } while (attempts < 10);
-    
-    return c.text('Could not generate unique path', 500);
+
+    return c.text(result.body.error, result.status);
   } catch (error) {
     console.error('Error handling root path:', error);
     return c.text('Internal Server Error', 500);
   }
 });
 
-// 处理笔记路径 - 显示编辑器界面
 notes.get('/:path', async (c) => {
   const path = c.req.param('path');
-  
-  // 检查是否是保留路径
-  if (path === 'admin' || path === 'api' || path === 'static') {
+
+  if (isReservedPath(path)) {
     return c.notFound();
   }
-  
-  const minLength = parseInt(c.env.PATH_MIN_LENGTH || '1');
-  const maxLength = parseInt(c.env.PATH_MAX_LENGTH || '4');
-  
-  const { validatePath } = await import('../utils/crypto');
-  
-  if (!validatePath(path, minLength, maxLength)) {
+
+  if (!isRenderablePath(c.env, path)) {
     return c.text('Invalid path', 400);
   }
-  
+
   return c.html(getNoteEditorHTML(path));
 });
 
@@ -76,7 +44,7 @@ function getNoteEditorHTML(path: string): string {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${path} - CloudNote</title>
-  <link href="https://cdn.quilljs.com/1.3.6/quill.snow.css" rel="stylesheet">
+  <style>${QUILL_SNOW_CSS}</style>
   <style>
     /* CSS变量 - 设计系统 */
     :root {
@@ -293,81 +261,46 @@ function getNoteEditorHTML(path: string): string {
       background: #fef3c7;
     }
     
-    /* Quill编辑器容器 */
+    /* Quill 编辑器容器 */
     #editor {
       flex: 1;
       background: var(--bg-color);
-      border-radius: var(--border-radius);
-      overflow: visible; /* 改为visible */
       display: flex;
       flex-direction: column;
-      position: relative;
-      min-height: 0; /* 确保flex子元素正确收缩 */
+      min-height: 0;
     }
-    
-    .ql-toolbar {
+
+    /* 让官方 snow 主题主导布局，只保留最小的尺寸兜底 */
+    .ql-toolbar.ql-snow {
       border: 1px solid var(--border-color);
       border-bottom: none;
       border-top-left-radius: var(--border-radius);
       border-top-right-radius: var(--border-radius);
       background: var(--bg-secondary);
-      position: relative;
-      z-index: 100;
       flex-shrink: 0;
     }
-    
-    /* Quill下拉菜单修复 - 更强力的样式 */
-    .ql-toolbar .ql-picker {
-      position: relative;
+
+    .ql-toolbar.ql-snow button {
+      width: 28px;
+      height: 28px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
     }
-    
-    .ql-toolbar .ql-picker-label {
-      position: relative;
-      z-index: 101;
+
+    .ql-toolbar.ql-snow button svg {
+      width: 18px;
+      height: 18px;
     }
-    
-    .ql-toolbar .ql-picker-options {
-      position: absolute !important;
-      z-index: 9999 !important;
-      background: var(--bg-color) !important;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important;
-      border: 1px solid var(--border-color) !important;
-      border-radius: var(--border-radius) !important;
-      max-height: 200px !important;
-      overflow-y: auto !important;
-      top: 100% !important;
-      margin-top: 4px !important;
-    }
-    
-    .ql-toolbar .ql-picker.ql-expanded {
-      overflow: visible !important;
-    }
-    
-    .ql-toolbar .ql-picker.ql-expanded .ql-picker-label {
-      z-index: 102 !important;
-    }
-    
-    .ql-toolbar .ql-picker.ql-expanded .ql-picker-options {
-      display: block !important;
-      z-index: 9999 !important;
-    }
-    
-    /* 确保下拉选项可点击 */
-    .ql-picker-options .ql-picker-item {
-      position: relative;
-      z-index: 9999 !important;
-    }
-    
-    .ql-container {
+
+    .ql-container.ql-snow {
       flex: 1;
       border: 1px solid var(--border-color);
       border-bottom-left-radius: var(--border-radius);
       border-bottom-right-radius: var(--border-radius);
       font-size: 16px;
       line-height: 1.6;
-      overflow-y: auto;
-      position: relative;
-      z-index: 1;
       min-height: 0;
     }
     
@@ -645,38 +578,20 @@ function getNoteEditorHTML(path: string): string {
         padding: var(--spacing-md);
       }
       
-      .ql-toolbar {
+      .ql-toolbar.ql-snow {
         overflow-x: auto;
-        overflow-y: visible !important;
         white-space: nowrap;
-        position: relative;
-        z-index: 500 !important;
       }
       
-      /* 移动端下拉菜单特殊处理 */
-      .ql-toolbar .ql-picker {
-        position: static !important;
-      }
-      
-      .ql-toolbar .ql-picker-options {
-        position: fixed !important;
-        left: 50% !important;
-        transform: translateX(-50%) !important;
-        width: 90% !important;
-        max-width: 300px !important;
-        z-index: 99999 !important;
-        top: auto !important;
-      }
-      
-      .ql-toolbar::-webkit-scrollbar {
+      .ql-toolbar.ql-snow::-webkit-scrollbar {
         height: 4px;
       }
       
-      .ql-toolbar::-webkit-scrollbar-track {
+      .ql-toolbar.ql-snow::-webkit-scrollbar-track {
         background: var(--bg-secondary);
       }
       
-      .ql-toolbar::-webkit-scrollbar-thumb {
+      .ql-toolbar.ql-snow::-webkit-scrollbar-thumb {
         background: var(--border-color);
         border-radius: 2px;
       }
@@ -710,19 +625,8 @@ function getNoteEditorHTML(path: string): string {
         padding: 4px var(--spacing-sm);
       }
       
-      .ql-container {
+      .ql-container.ql-snow {
         font-size: 15px;
-      }
-      
-      /* 确保下拉菜单在最上层 */
-      .ql-toolbar .ql-picker-options {
-        top: 100%;
-        margin-top: 2px;
-      }
-      
-      .editor-container {
-        position: relative;
-        z-index: 1;
       }
     }
     

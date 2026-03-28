@@ -14,12 +14,10 @@ SESSION_DURATION = "86400"
 [[d1_databases]]
 binding = "DB"
 database_name = "cloudnote-db"
-database_id = ""
 
 # KV 命名空间绑定（Deploy Button 会自动创建并填充 id）
 [[kv_namespaces]]
 binding = "CACHE"
-id = ""
 
 # R2 存储桶绑定（Deploy Button 会自动创建）
 [[r2_buckets]]

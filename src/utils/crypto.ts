@@ -1,66 +1,138 @@
 import crypto from 'node:crypto';
+import { FilterXSS, type IFilterXSSOptions } from 'xss';
 
 const ITERATIONS = 100000;
 const KEY_LENGTH = 64;
 const SALT_LENGTH = 32;
+const SAFE_PATH_PATTERN = /^[a-zA-Z0-9-_]+$/;
 
-export async function hashPassword(password: string): Promise<string> {
-  const salt = crypto.randomBytes(SALT_LENGTH);
-  
+const XSS_OPTIONS: IFilterXSSOptions = {
+  allowCommentTag: false,
+  stripIgnoreTag: true,
+  stripIgnoreTagBody: ['script', 'style'],
+  whiteList: {
+    a: ['href', 'target', 'rel'],
+    b: [],
+    blockquote: [],
+    br: [],
+    code: [],
+    div: ['align'],
+    em: [],
+    h1: [],
+    h2: [],
+    h3: [],
+    h4: [],
+    h5: [],
+    h6: [],
+    hr: [],
+    i: [],
+    img: ['src', 'alt', 'width', 'height'],
+    li: [],
+    ol: [],
+    p: ['align'],
+    pre: [],
+    s: [],
+    span: ['style'],
+    strong: [],
+    sub: [],
+    sup: [],
+    u: [],
+    ul: [],
+  },
+  css: {
+    whiteList: {
+      'background-color': true,
+      color: true,
+      'font-size': true,
+      'text-align': true,
+    },
+  },
+  onIgnoreTagAttr(tag, name, value) {
+    if (tag === 'img' && name === 'src' && value.startsWith('data:image/')) {
+      return `${name}="${value}"`;
+    }
+
+    return undefined;
+  },
+};
+
+const xssFilter = new FilterXSS(XSS_OPTIONS);
+
+function derivePasswordHash(password: string, salt: Buffer): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    crypto.pbkdf2(password, salt, ITERATIONS, KEY_LENGTH, 'sha256', (err, derivedKey) => {
-      if (err) reject(err);
-      else resolve(salt.toString('hex') + ':' + derivedKey.toString('hex'));
-    });
+    crypto.pbkdf2(
+      password,
+      salt,
+      ITERATIONS,
+      KEY_LENGTH,
+      'sha256',
+      (err, derivedKey) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+
+        resolve(derivedKey);
+      },
+    );
   });
 }
 
+export async function hashPassword(password: string): Promise<string> {
+  const salt = crypto.randomBytes(SALT_LENGTH);
+  const derivedKey = await derivePasswordHash(password, salt);
+  return `${salt.toString('hex')}:${derivedKey.toString('hex')}`;
+}
+
 export async function verifyPassword(password: string, hash: string): Promise<boolean> {
-  const [salt, key] = hash.split(':');
-  const saltBuffer = Buffer.from(salt, 'hex');
-  
-  return new Promise((resolve, reject) => {
-    crypto.pbkdf2(password, saltBuffer, ITERATIONS, KEY_LENGTH, 'sha256', (err, derivedKey) => {
-      if (err) reject(err);
-      else resolve(key === derivedKey.toString('hex'));
-    });
-  });
+  const [saltHex, keyHex] = hash.split(':');
+
+  if (!saltHex || !keyHex) {
+    return false;
+  }
+
+  const salt = Buffer.from(saltHex, 'hex');
+  const expected = Buffer.from(keyHex, 'hex');
+  const actual = await derivePasswordHash(password, salt);
+
+  if (expected.length !== actual.length) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(expected, actual);
 }
 
 export function generateRandomPath(length: number): string {
   const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  const bytes = new Uint8Array(length);
+  crypto.getRandomValues(bytes);
+
   let result = '';
-  const array = new Uint8Array(length);
-  crypto.getRandomValues(array);
-  
-  for (let i = 0; i < length; i++) {
-    result += chars[array[i] % chars.length];
+  for (let index = 0; index < length; index += 1) {
+    result += chars[bytes[index] % chars.length];
   }
-  
+
   return result;
 }
 
 export function validatePath(path: string, minLength: number, maxLength: number): boolean {
-  if (!path || path === 'admin' || path === 'api' || path === 'static') {
+  if (
+    !path ||
+    path === 'admin' ||
+    path === 'api' ||
+    path === 'static' ||
+    path === 'health'
+  ) {
     return false;
   }
-  
+
   if (path.length < minLength || path.length > maxLength) {
     return false;
   }
-  
-  return /^[a-zA-Z0-9-_]+$/.test(path);
+
+  return SAFE_PATH_PATTERN.test(path);
 }
 
 export function sanitizeHtml(html: string): string {
-  // 基础XSS防护，移除危险标签和属性
-  const dangerousTags = /<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi;
-  const dangerousAttrs = /on\w+\s*=\s*["'][^"']*["']/gi;
-  const dangerousProtocols = /javascript:|data:text\/html/gi;
-  
-  let clean = html.replace(dangerousTags, '');
-  clean = clean.replace(dangerousAttrs, '');
-  clean = clean.replace(dangerousProtocols, '');
-  
-  return clean;
+  return xssFilter.process(html);
 }

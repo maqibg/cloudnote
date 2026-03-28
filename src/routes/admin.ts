@@ -1,216 +1,140 @@
-import { Hono } from 'hono';
-import type { Bindings, Note, LoginRequest, ImportRequest } from '../types';
+import { Context, Hono } from 'hono';
 import { requireAuth } from '../middleware/auth';
-import { createJWT, verifyJWT } from '../utils/jwt';
-import { hashPassword, verifyPassword } from '../utils/crypto';
+import {
+  createBackup,
+  createNoteByPath,
+  getAdminStats,
+  getNoteByPath,
+  deleteNoteByPath,
+  exportNotes,
+  importNotes,
+  listAdminLogs,
+  listNotes,
+  loginAdmin,
+  updateNoteByPath,
+} from '../services/admin';
+import type { AppEnv, ImportRequest, LoginRequest } from '../types';
 
-const admin = new Hono<{ Bindings: Bindings }>();
+const admin = new Hono<AppEnv>();
 
-// Admin登录页面
 admin.get('/', async (c) => {
   return c.html(getAdminLoginHTML());
 });
 
-// Admin管理面板 - 不需要requireAuth，因为是HTML页面，会在前端检查token
 admin.get('/dashboard', async (c) => {
   return c.html(getAdminDashboardHTML());
 });
 
-// Admin API - 登录
-admin.post('/api/login', async (c) => {
+function getListQuery(c: Context<AppEnv>) {
+  return {
+    page: Number.parseInt(c.req.query('page') || '1', 10),
+    limit: Number.parseInt(c.req.query('limit') || '20', 10),
+    search: c.req.query('search') || '',
+  };
+}
+
+async function handleLogin(c: Context<AppEnv>) {
   const body = await c.req.json<LoginRequest>();
-  
-  if (body.username !== c.env.ADMIN_USERNAME) {
-    return c.json({ error: 'Invalid credentials' }, 401);
-  }
-  
-  const validPassword = await verifyPassword(body.password, c.env.ADMIN_PASSWORD);
-  if (!validPassword) {
-    // 如果是明文密码比较（初始设置）
-    if (body.password === c.env.ADMIN_PASSWORD) {
-      // 生成token
-      const duration = parseInt(c.env.SESSION_DURATION || '86400');
-      const token = await createJWT(c.env.JWT_SECRET, body.username, duration);
-      
-      // 记录登录日志
-      await c.env.DB.prepare(
-        'INSERT INTO admin_logs (action, details) VALUES (?, ?)'
-      ).bind('login', `Admin ${body.username} logged in`).run();
-      
-      return c.json({ token, expires_in: duration });
-    }
-    return c.json({ error: 'Invalid credentials' }, 401);
-  }
-  
-  const duration = parseInt(c.env.SESSION_DURATION || '86400');
-  const token = await createJWT(c.env.JWT_SECRET, body.username, duration);
-  
-  // 记录登录日志
-  await c.env.DB.prepare(
-    'INSERT INTO admin_logs (action, details) VALUES (?, ?)'
-  ).bind('login', `Admin ${body.username} logged in`).run();
-  
-  return c.json({ token, expires_in: duration });
-});
+  const result = await loginAdmin(c.env, body);
+  return c.json(result.body, result.status);
+}
 
-// 获取所有笔记列表
-admin.get('/api/notes', requireAuth, async (c) => {
-  try {
-    const { results } = await c.env.DB.prepare(
-      'SELECT path, is_locked, lock_type, created_at, updated_at, view_count FROM notes ORDER BY updated_at DESC'
-    ).all<Note>();
-    
-    return c.json({ notes: results });
-  } catch (error) {
-    console.error('Error fetching notes:', error);
-    return c.json({ error: 'Database error' }, 500);
-  }
-});
+admin.post('/login', handleLogin);
+admin.post('/api/login', handleLogin);
 
-// 删除笔记
-admin.delete('/api/note/:path', requireAuth, async (c) => {
-  const path = c.req.param('path');
-  
-  try {
-    await c.env.DB.prepare(
-      'DELETE FROM notes WHERE path = ?'
-    ).bind(path).run();
-    
-    // 清除缓存
-    await c.env.CACHE.delete(`note:${path}`);
-    
-    // 记录日志
-    await c.env.DB.prepare(
-      'INSERT INTO admin_logs (action, target_path, details) VALUES (?, ?, ?)'
-    ).bind('delete', path, `Deleted note: ${path}`).run();
-    
-    return c.json({ success: true });
-  } catch (error) {
-    console.error('Error deleting note:', error);
-    return c.json({ error: 'Database error' }, 500);
-  }
-});
+async function handleStats(c: Context<AppEnv>) {
+  const result = await getAdminStats(c.env);
+  return c.json(result.body, result.status);
+}
 
-// 修改笔记
-admin.put('/api/note/:path', requireAuth, async (c) => {
-  const path = c.req.param('path');
-  const body = await c.req.json<{ content: string }>();
-  
-  try {
-    await c.env.DB.prepare(
-      'UPDATE notes SET content = ?, updated_at = CURRENT_TIMESTAMP WHERE path = ?'
-    ).bind(body.content, path).run();
-    
-    // 清除缓存
-    await c.env.CACHE.delete(`note:${path}`);
-    
-    // 记录日志
-    await c.env.DB.prepare(
-      'INSERT INTO admin_logs (action, target_path, details) VALUES (?, ?, ?)'
-    ).bind('update', path, `Updated note: ${path}`).run();
-    
-    return c.json({ success: true });
-  } catch (error) {
-    console.error('Error updating note:', error);
-    return c.json({ error: 'Database error' }, 500);
-  }
-});
+admin.get('/stats', requireAuth, handleStats);
+admin.get('/api/stats', requireAuth, handleStats);
 
-// 导出所有笔记
-admin.post('/api/export', requireAuth, async (c) => {
-  try {
-    const { results } = await c.env.DB.prepare(
-      'SELECT * FROM notes ORDER BY path'
-    ).all<Note>();
-    
-    const exportData = {
-      version: '1.0',
-      exported_at: new Date().toISOString(),
-      notes: results
-    };
-    
-    // 保存到R2
-    const filename = `export-${Date.now()}.json`;
-    await c.env.STORAGE.put(filename, JSON.stringify(exportData));
-    
-    // 记录日志
-    await c.env.DB.prepare(
-      'INSERT INTO admin_logs (action, details) VALUES (?, ?)'
-    ).bind('export', `Exported ${results.length} notes to ${filename}`).run();
-    
-    return c.json({ 
-      success: true,
-      filename,
-      data: exportData
-    });
-  } catch (error) {
-    console.error('Error exporting notes:', error);
-    return c.json({ error: 'Export failed' }, 500);
-  }
-});
+async function handleListNotes(c: Context<AppEnv>) {
+  const result = await listNotes(c.env, getListQuery(c));
+  return c.json(result.body, result.status);
+}
 
-// 导入笔记
-admin.post('/api/import', requireAuth, async (c) => {
+admin.get('/notes', requireAuth, handleListNotes);
+admin.get('/api/notes', requireAuth, handleListNotes);
+
+async function handleGetNote(c: Context<AppEnv>) {
+  const result = await getNoteByPath(c.env, c.req.param('path'));
+  return c.json(result.body, result.status);
+}
+
+admin.get('/notes/:path', requireAuth, handleGetNote);
+admin.get('/api/note/:path', requireAuth, handleGetNote);
+
+async function handleDeleteNote(c: Context<AppEnv>) {
+  const result = await deleteNoteByPath(c.env, c.req.param('path'));
+  return c.json(result.body, result.status);
+}
+
+admin.delete('/notes/:path', requireAuth, handleDeleteNote);
+admin.delete('/api/note/:path', requireAuth, handleDeleteNote);
+
+async function handleUpdateNote(c: Context<AppEnv>) {
+  const body = await c.req.json<{
+    content?: string;
+    is_locked?: boolean;
+    lock_type?: 'read' | 'write';
+    password?: string;
+  }>();
+  const result = await updateNoteByPath(c.env, c.req.param('path'), body);
+  return c.json(result.body, result.status);
+}
+
+admin.put('/notes/:path', requireAuth, handleUpdateNote);
+admin.put('/api/note/:path', requireAuth, handleUpdateNote);
+
+async function handleCreateNote(c: Context<AppEnv>) {
+  const body = await c.req.json<{
+    path: string;
+    content?: string;
+    is_locked?: boolean;
+    lock_type?: 'read' | 'write';
+    password?: string;
+  }>();
+  const result = await createNoteByPath(c.env, body);
+  return c.json(result.body, result.status);
+}
+
+admin.post('/notes', requireAuth, handleCreateNote);
+admin.post('/api/notes', requireAuth, handleCreateNote);
+
+async function handleExport(c: Context<AppEnv>) {
+  const result = await exportNotes(c.env);
+  return c.json(result.body, result.status);
+}
+
+admin.get('/export', requireAuth, handleExport);
+admin.post('/api/export', requireAuth, handleExport);
+
+async function handleBackup(c: Context<AppEnv>) {
+  const result = await createBackup(c.env);
+  return c.json(result.body, result.status);
+}
+
+admin.post('/backup', requireAuth, handleBackup);
+admin.post('/api/backup', requireAuth, handleBackup);
+
+async function handleImport(c: Context<AppEnv>) {
   const body = await c.req.json<ImportRequest>();
-  
-  if (!body.notes || !Array.isArray(body.notes)) {
-    return c.json({ error: 'Invalid import data' }, 400);
-  }
-  
-  let imported = 0;
-  let failed = 0;
-  
-  for (const note of body.notes) {
-    try {
-      let passwordHash = null;
-      if (note.password) {
-        passwordHash = await hashPassword(note.password);
-      }
-      
-      await c.env.DB.prepare(
-        `INSERT OR REPLACE INTO notes 
-         (path, content, is_locked, lock_type, password_hash) 
-         VALUES (?, ?, ?, ?, ?)`
-      ).bind(
-        note.path,
-        note.content,
-        note.is_locked ? 1 : 0,
-        note.lock_type || null,
-        passwordHash
-      ).run();
-      
-      imported++;
-    } catch (error) {
-      console.error(`Failed to import note ${note.path}:`, error);
-      failed++;
-    }
-  }
-  
-  // 记录日志
-  await c.env.DB.prepare(
-    'INSERT INTO admin_logs (action, details) VALUES (?, ?)'
-  ).bind('import', `Imported ${imported} notes, ${failed} failed`).run();
-  
-  return c.json({ 
-    success: true,
-    imported,
-    failed
-  });
-});
+  const result = await importNotes(c.env, body);
+  return c.json(result.body, result.status);
+}
 
-// 获取管理日志
-admin.get('/api/logs', requireAuth, async (c) => {
-  try {
-    const { results } = await c.env.DB.prepare(
-      'SELECT * FROM admin_logs ORDER BY timestamp DESC LIMIT 100'
-    ).all();
-    
-    return c.json({ logs: results });
-  } catch (error) {
-    console.error('Error fetching logs:', error);
-    return c.json({ error: 'Database error' }, 500);
-  }
-});
+admin.post('/import', requireAuth, handleImport);
+admin.post('/api/import', requireAuth, handleImport);
+
+async function handleLogs(c: Context<AppEnv>) {
+  const result = await listAdminLogs(c.env);
+  return c.json(result.body, result.status);
+}
+
+admin.get('/logs', requireAuth, handleLogs);
+admin.get('/api/logs', requireAuth, handleLogs);
 
 function getAdminLoginHTML(): string {
   return `<!DOCTYPE html>
@@ -729,6 +653,131 @@ function getAdminDashboardHTML(): string {
     .message.error {
       background: var(--error-color);
     }
+
+    .modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.45);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: var(--spacing-lg);
+      z-index: 1200;
+    }
+
+    .modal.show {
+      display: flex;
+    }
+
+    .modal-card {
+      width: min(720px, 100%);
+      background: var(--bg-color);
+      border-radius: var(--border-radius);
+      box-shadow: var(--shadow-lg);
+      overflow: hidden;
+    }
+
+    .modal-header {
+      padding: var(--spacing-lg);
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .modal-body {
+      padding: var(--spacing-lg);
+      display: grid;
+      gap: var(--spacing-md);
+    }
+
+    .modal-footer {
+      padding: var(--spacing-lg);
+      border-top: 1px solid var(--border-color);
+      display: flex;
+      justify-content: flex-end;
+      gap: var(--spacing-sm);
+    }
+
+    .form-grid {
+      display: grid;
+      gap: var(--spacing-md);
+    }
+
+    .form-row {
+      display: grid;
+      gap: var(--spacing-xs);
+    }
+
+    .form-label {
+      font-size: 13px;
+      color: var(--text-secondary);
+      font-weight: 500;
+    }
+
+    .form-input,
+    .form-select,
+    .form-textarea {
+      width: 100%;
+      padding: var(--spacing-sm);
+      border: 1px solid var(--border-color);
+      border-radius: var(--border-radius);
+      font: inherit;
+      background: var(--bg-color);
+    }
+
+    .form-textarea {
+      min-height: 220px;
+      resize: vertical;
+    }
+
+    .checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-sm);
+    }
+
+    .pagination {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: var(--spacing-xs);
+      margin-top: var(--spacing-md);
+      flex-wrap: wrap;
+    }
+
+    .page-btn {
+      padding: 6px 10px;
+      border-radius: 6px;
+      border: 1px solid var(--border-color);
+      background: var(--bg-color);
+      cursor: pointer;
+    }
+
+    .page-btn.active {
+      background: var(--primary-color);
+      border-color: var(--primary-color);
+      color: #fff;
+    }
+
+    .page-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .logs-box {
+      background: #0f172a;
+      color: #e2e8f0;
+      border-radius: var(--border-radius);
+      padding: var(--spacing-md);
+      font-family: Consolas, 'Courier New', monospace;
+      font-size: 12px;
+      line-height: 1.6;
+      max-height: 360px;
+      overflow: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
     
     @keyframes slideIn {
       from {
@@ -823,11 +872,17 @@ function getAdminDashboardHTML(): string {
     <div class="actions-card">
       <h2 class="actions-header">批量操作</h2>
       <div class="action-buttons">
+        <button class="btn" onclick="openCreateModal()">
+          新建笔记
+        </button>
         <button class="btn btn-primary" onclick="exportNotes()">
           导出所有笔记
         </button>
         <button class="btn" onclick="showImportDialog()">
           导入笔记
+        </button>
+        <button class="btn" onclick="createBackup()">
+          创建备份
         </button>
         <button class="btn" onclick="viewLogs()">
           查看操作日志
@@ -840,7 +895,7 @@ function getAdminDashboardHTML(): string {
       <div class="table-header">
         <h2 class="table-title">笔记列表</h2>
         <div class="search-box">
-          <input type="text" class="search-input" placeholder="搜索路径..." id="searchInput" onkeyup="filterTable()">
+          <input type="text" class="search-input" placeholder="搜索路径或内容..." id="searchInput" oninput="handleSearchInput()">
         </div>
       </div>
       <table>
@@ -864,8 +919,63 @@ function getAdminDashboardHTML(): string {
         </tbody>
       </table>
     </div>
+    <div class="pagination" id="pagination"></div>
   </div>
-  
+
+  <div class="modal" id="editorModal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2 id="editorModalTitle">编辑笔记</h2>
+        <button class="btn btn-small" onclick="closeEditorModal()">关闭</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-grid">
+          <div class="form-row">
+            <label class="form-label" for="editorPath">路径</label>
+            <input id="editorPath" class="form-input" />
+          </div>
+          <div class="form-row">
+            <label class="form-label" for="editorContent">内容</label>
+            <textarea id="editorContent" class="form-textarea"></textarea>
+          </div>
+          <div class="checkbox-row">
+            <input type="checkbox" id="editorLocked" onchange="toggleEditorLockFields()" />
+            <label for="editorLocked">锁定笔记</label>
+          </div>
+          <div id="editorLockFields" style="display:none;">
+            <div class="form-row">
+              <label class="form-label" for="editorLockType">锁定类型</label>
+              <select id="editorLockType" class="form-select">
+                <option value="write">限制编辑</option>
+                <option value="read">限制访问</option>
+              </select>
+            </div>
+            <div class="form-row">
+              <label class="form-label" for="editorPassword">密码</label>
+              <input id="editorPassword" type="password" class="form-input" placeholder="创建时必填，编辑时留空表示保留原密码" />
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="closeEditorModal()">取消</button>
+        <button class="btn btn-primary" onclick="saveEditorNote()">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="logsModal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2>操作日志</h2>
+        <button class="btn btn-small" onclick="closeLogsModal()">关闭</button>
+      </div>
+      <div class="modal-body">
+        <div id="logsBox" class="logs-box">加载中...</div>
+      </div>
+    </div>
+  </div>
+   
   <script>
     const token = localStorage.getItem('adminToken');
     if (!token) {
@@ -873,10 +983,50 @@ function getAdminDashboardHTML(): string {
     }
     
     let allNotes = [];
+    let currentPage = 1;
+    let totalPages = 1;
+    let currentSearch = '';
+    let editorMode = 'edit';
+    let editingPath = '';
+    let searchTimer = null;
     
-    async function fetchNotes() {
+    async function fetchStats() {
       try {
-        const response = await fetch('/admin/api/notes', {
+        const response = await fetch('/admin/api/stats', {
+          headers: {
+            'Authorization': 'Bearer ' + token
+          }
+        });
+
+        if (response.status === 401) {
+          localStorage.removeItem('adminToken');
+          window.location.href = '/admin';
+          return;
+        }
+
+        if (!response.ok) {
+          throw new Error('Failed to fetch stats');
+        }
+
+        const stats = await response.json();
+        document.getElementById('totalNotes').textContent = stats.total_notes || 0;
+        document.getElementById('lockedNotes').textContent = stats.locked_notes || 0;
+        document.getElementById('totalViews').textContent = stats.total_views || 0;
+      } catch (error) {
+        console.error('Error fetching stats:', error);
+      }
+    }
+
+    async function fetchNotes(page = currentPage) {
+      try {
+        currentPage = page;
+        const query = new URLSearchParams({
+          page: String(currentPage),
+          limit: '20',
+          search: currentSearch
+        });
+
+        const response = await fetch('/admin/api/notes?' + query.toString(), {
           headers: {
             'Authorization': 'Bearer ' + token
           }
@@ -892,8 +1042,9 @@ function getAdminDashboardHTML(): string {
         
         const data = await response.json();
         allNotes = data.notes;
+        totalPages = data.totalPages || 1;
         displayNotes(data.notes);
-        updateStats(data.notes);
+        renderPagination();
       } catch (error) {
         console.error('Error fetching notes:', error);
         showMessage('加载笔记失败', 'error');
@@ -928,16 +1079,13 @@ function getAdminDashboardHTML(): string {
               <button class="btn btn-danger btn-small" onclick="deleteNote('\${note.path}')">
                 删除
               </button>
+              <button class="btn btn-small" onclick="openEditModal('\${note.path}')">
+                编辑
+              </button>
             </td>
           </tr>
         \`;
       }).join('');
-    }
-    
-    function updateStats(notes) {
-      document.getElementById('totalNotes').textContent = notes.length;
-      document.getElementById('lockedNotes').textContent = notes.filter(n => n.is_locked).length;
-      document.getElementById('totalViews').textContent = notes.reduce((sum, n) => sum + n.view_count, 0);
     }
     
     function formatDate(dateStr) {
@@ -951,12 +1099,40 @@ function getAdminDashboardHTML(): string {
       });
     }
     
-    function filterTable() {
-      const searchTerm = document.getElementById('searchInput').value.toLowerCase();
-      const filtered = allNotes.filter(note => 
-        note.path.toLowerCase().includes(searchTerm)
-      );
-      displayNotes(filtered);
+    function renderPagination() {
+      const container = document.getElementById('pagination');
+
+      if (totalPages <= 1) {
+        container.innerHTML = '';
+        return;
+      }
+
+      const buttons = [];
+      buttons.push('<button class="page-btn" onclick="fetchNotes(' + (currentPage - 1) + ')" ' + (currentPage === 1 ? 'disabled' : '') + '>上一页</button>');
+
+      for (let page = 1; page <= totalPages; page++) {
+        if (
+          page === 1 ||
+          page === totalPages ||
+          (page >= currentPage - 2 && page <= currentPage + 2)
+        ) {
+          buttons.push('<button class="page-btn ' + (page === currentPage ? 'active' : '') + '" onclick="fetchNotes(' + page + ')">' + page + '</button>');
+        } else if (page === currentPage - 3 || page === currentPage + 3) {
+          buttons.push('<span>...</span>');
+        }
+      }
+
+      buttons.push('<button class="page-btn" onclick="fetchNotes(' + (currentPage + 1) + ')" ' + (currentPage === totalPages ? 'disabled' : '') + '>下一页</button>');
+      container.innerHTML = buttons.join('');
+    }
+
+    function handleSearchInput() {
+      const value = document.getElementById('searchInput').value;
+      window.clearTimeout(searchTimer);
+      searchTimer = window.setTimeout(() => {
+        currentSearch = value;
+        fetchNotes(1);
+      }, 250);
     }
     
     async function deleteNote(path) {
@@ -973,6 +1149,7 @@ function getAdminDashboardHTML(): string {
         if (response.ok) {
           showMessage('笔记已删除', 'success');
           fetchNotes();
+          fetchStats();
         } else {
           showMessage('删除失败', 'error');
         }
@@ -1032,11 +1209,12 @@ function getAdminDashboardHTML(): string {
           if (result.success) {
             showMessage(\`成功导入 \${result.imported} 条笔记，失败 \${result.failed} 条\`, 'success');
             fetchNotes();
+            fetchStats();
           }
         } catch (error) {
-          console.error('Error importing notes:', error);
-          showMessage('导入失败', 'error');
-        }
+        console.error('Error importing notes:', error);
+        showMessage('导入失败', 'error');
+      }
       };
       input.click();
     }
@@ -1050,15 +1228,156 @@ function getAdminDashboardHTML(): string {
         });
         
         const data = await response.json();
-        console.log('操作日志:', data.logs);
-        showMessage('操作日志已在控制台输出', 'success');
+        const logsText = (data.logs || []).map(log => {
+          const prefix = '[' + formatDate(log.timestamp) + ']';
+          const target = log.target_path ? ' /' + log.target_path : '';
+          return prefix + ' ' + log.action + target + (log.details ? ' - ' + log.details : '');
+        }).join('\n');
+        document.getElementById('logsBox').textContent = logsText || '暂无日志';
+        document.getElementById('logsModal').classList.add('show');
       } catch (error) {
         console.error('Error fetching logs:', error);
         showMessage('获取日志失败', 'error');
       }
     }
+
+    function closeLogsModal() {
+      document.getElementById('logsModal').classList.remove('show');
+    }
+
+    function openCreateModal() {
+      editorMode = 'create';
+      editingPath = '';
+      document.getElementById('editorModalTitle').textContent = '新建笔记';
+      document.getElementById('editorPath').value = '';
+      document.getElementById('editorPath').readOnly = false;
+      document.getElementById('editorContent').value = '';
+      document.getElementById('editorLocked').checked = false;
+      document.getElementById('editorLockType').value = 'write';
+      document.getElementById('editorPassword').value = '';
+      toggleEditorLockFields();
+      document.getElementById('editorModal').classList.add('show');
+    }
+
+    async function openEditModal(path) {
+      try {
+        const response = await fetch('/admin/api/note/' + path, {
+          headers: {
+            'Authorization': 'Bearer ' + token
+          }
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to fetch note');
+        }
+
+        const note = await response.json();
+        editorMode = 'edit';
+        editingPath = note.path;
+        document.getElementById('editorModalTitle').textContent = '编辑笔记 /' + note.path;
+        document.getElementById('editorPath').value = note.path;
+        document.getElementById('editorPath').readOnly = true;
+        document.getElementById('editorContent').value = note.content || '';
+        document.getElementById('editorLocked').checked = !!note.is_locked;
+        document.getElementById('editorLockType').value = note.lock_type || 'write';
+        document.getElementById('editorPassword').value = '';
+        toggleEditorLockFields();
+        document.getElementById('editorModal').classList.add('show');
+      } catch (error) {
+        console.error('Error fetching note:', error);
+        showMessage('加载笔记失败', 'error');
+      }
+    }
+
+    function closeEditorModal() {
+      document.getElementById('editorModal').classList.remove('show');
+    }
+
+    function toggleEditorLockFields() {
+      document.getElementById('editorLockFields').style.display =
+        document.getElementById('editorLocked').checked ? 'grid' : 'none';
+    }
+
+    async function saveEditorNote() {
+      const path = document.getElementById('editorPath').value.trim();
+      const content = document.getElementById('editorContent').value;
+      const isLocked = document.getElementById('editorLocked').checked;
+      const lockType = document.getElementById('editorLockType').value;
+      const password = document.getElementById('editorPassword').value;
+
+      if (!path) {
+        showMessage('路径不能为空', 'error');
+        return;
+      }
+
+      const body = { content };
+
+      if (isLocked) {
+        body.is_locked = true;
+        body.lock_type = lockType;
+        if (password) {
+          body.password = password;
+        }
+      } else if (editorMode === 'edit') {
+        body.is_locked = false;
+      }
+
+      try {
+        const endpoint = editorMode === 'create'
+          ? '/admin/api/notes'
+          : '/admin/api/note/' + editingPath;
+        const method = editorMode === 'create' ? 'POST' : 'PUT';
+        const payload = editorMode === 'create' ? { ...body, path } : body;
+
+        const response = await fetch(endpoint, {
+          method,
+          headers: {
+            'Authorization': 'Bearer ' + token,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await response.json();
+        if (!response.ok) {
+          showMessage(data.error || '保存失败', 'error');
+          return;
+        }
+
+        closeEditorModal();
+        fetchNotes(editorMode === 'create' ? 1 : currentPage);
+        fetchStats();
+        showMessage(editorMode === 'create' ? '创建成功' : '更新成功', 'success');
+      } catch (error) {
+        console.error('Error saving note:', error);
+        showMessage('保存失败', 'error');
+      }
+    }
+
+    async function createBackup() {
+      try {
+        const response = await fetch('/admin/api/backup', {
+          method: 'POST',
+          headers: {
+            'Authorization': 'Bearer ' + token
+          }
+        });
+
+        const data = await response.json();
+        if (!response.ok) {
+          showMessage(data.error || '备份失败', 'error');
+          return;
+        }
+
+        showMessage('备份已创建：' + data.filename, 'success');
+      } catch (error) {
+        console.error('Error creating backup:', error);
+        showMessage('备份失败', 'error');
+      }
+    }
     
     function refreshData() {
+      fetchStats();
       fetchNotes();
       showMessage('数据已刷新', 'success');
     }
@@ -1085,10 +1404,14 @@ function getAdminDashboardHTML(): string {
     }
     
     // 初始加载
+    fetchStats();
     fetchNotes();
     
     // 定期刷新
-    setInterval(fetchNotes, 60000);
+    setInterval(() => {
+      fetchStats();
+      fetchNotes(currentPage);
+    }, 60000);
   </script>
 </body>
 </html>`;
