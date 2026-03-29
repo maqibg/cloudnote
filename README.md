@@ -64,7 +64,7 @@ npm run dev
 ```bash
 npm run dev            # wrangler dev
 npm run db:init        # 初始化远程 D1
-npm run deploy         # 先部署并创建/绑定资源，再初始化数据库
+npm run deploy         # 直接部署，首次请求时自动初始化 schema
 npm run generate-types # 生成 worker-configuration.d.ts
 npm run typecheck      # wrangler types + tsc --noEmit
 npm test               # vitest run
@@ -114,7 +114,7 @@ npm run format         # prettier --write .
 - 自动创建并绑定 `D1 / KV / R2`
 - 提示填写 `ADMIN_USERNAME / ADMIN_PASSWORD / JWT_SECRET`
 - 使用当前仓库代码完成 Workers 部署
-- 在资源绑定可用后执行 `db:init`
+- 首次请求时自动执行 schema 初始化
 
 如果需要手动部署，再按下面的命令执行。
 

@@ -5,7 +5,7 @@
   "main": "src/index.ts",
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy && npm run db:init",
+    "deploy": "wrangler deploy",
     "db:init": "wrangler d1 execute DB --file=./schema.sql --remote",
     "generate-types": "wrangler types",
     "test": "vitest run",

@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { ensureSchema } from './middleware/ensureSchema';
 import { secureHeaders } from 'hono/secure-headers';
 import { rateLimiter } from './middleware/rateLimiter';
 import { adminRoutes } from './routes/admin';
@@ -25,6 +26,7 @@ export function createApp() {
     allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowHeaders: ['Content-Type', 'Authorization'],
   }));
+  app.use('*', ensureSchema);
   app.use('*', rateLimiter());
 
   app.route('/api', apiRoutes);
