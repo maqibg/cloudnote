@@ -7,6 +7,7 @@ compatibility_flags = ["nodejs_compat"]
 [vars]
 PATH_MIN_LENGTH = "1"
 PATH_MAX_LENGTH = "20"
+RANDOM_PATH_LENGTH = "6"
 RATE_LIMIT_PER_MINUTE = "60"
 SESSION_DURATION = "86400"
 

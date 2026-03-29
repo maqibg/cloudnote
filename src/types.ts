@@ -78,6 +78,7 @@ export interface Bindings {
   JWT_SECRET: string;
   PATH_MIN_LENGTH: string;
   PATH_MAX_LENGTH: string;
+  RANDOM_PATH_LENGTH?: string;
   RATE_LIMIT_PER_MINUTE: string;
   SESSION_DURATION: string;
 }

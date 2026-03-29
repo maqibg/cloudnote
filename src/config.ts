@@ -2,6 +2,7 @@ import type { Bindings } from './types';
 
 const DEFAULT_MIN_PATH_LENGTH = 1;
 const DEFAULT_MAX_PATH_LENGTH = 4;
+const DEFAULT_RANDOM_PATH_LENGTH = 6;
 const DEFAULT_RATE_LIMIT = 60;
 const DEFAULT_SESSION_DURATION = 86400;
 
@@ -26,6 +27,18 @@ export function getPathLengthRange(
     minLength,
     maxLength: Math.max(minLength, maxLength),
   };
+}
+
+export function getRandomPathLength(
+  env: Pick<Bindings, 'PATH_MAX_LENGTH' | 'PATH_MIN_LENGTH' | 'RANDOM_PATH_LENGTH'>,
+): number {
+  const { minLength, maxLength } = getPathLengthRange(env);
+  const preferredLength = parsePositiveInt(
+    env.RANDOM_PATH_LENGTH,
+    DEFAULT_RANDOM_PATH_LENGTH,
+  );
+
+  return Math.min(maxLength, Math.max(minLength, preferredLength));
 }
 
 export function getRateLimitPerMinute(

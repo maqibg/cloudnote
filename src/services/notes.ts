@@ -1,4 +1,4 @@
-import { getPathLengthRange } from '../config';
+import { getPathLengthRange, getRandomPathLength } from '../config';
 import {
   generateRandomPath,
   hashPassword,
@@ -356,8 +356,7 @@ export async function removeNoteLock(
 export async function generateAvailablePath(
   env: Bindings,
 ): Promise<ServiceResult<{ error: string } | { path: string }>> {
-  const { minLength, maxLength } = getPathLengthRange(env);
-  const length = Math.floor(Math.random() * (maxLength - minLength + 1)) + minLength;
+  const length = getRandomPathLength(env);
 
   for (let attempt = 0; attempt < MAX_GENERATE_ATTEMPTS; attempt += 1) {
     const path = generateRandomPath(length);

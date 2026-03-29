@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   getPathLengthRange,
+  getRandomPathLength,
   getRateLimitPerMinute,
   getSessionDuration,
 } from './config';
@@ -40,5 +41,23 @@ describe('config helpers', () => {
         SESSION_DURATION: 'bad',
       }),
     ).toBe(86400);
+  });
+
+  it('uses fixed random path length with default fallback 6', () => {
+    expect(
+      getRandomPathLength({
+        PATH_MIN_LENGTH: '1',
+        PATH_MAX_LENGTH: '20',
+        RANDOM_PATH_LENGTH: '6',
+      }),
+    ).toBe(6);
+
+    expect(
+      getRandomPathLength({
+        PATH_MIN_LENGTH: '8',
+        PATH_MAX_LENGTH: '20',
+        RANDOM_PATH_LENGTH: '6',
+      }),
+    ).toBe(8);
   });
 });
