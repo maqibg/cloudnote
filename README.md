@@ -2,6 +2,8 @@
 
 CloudNote 是一个基于 **Cloudflare Workers + D1 + KV + R2** 的云笔记应用。
 
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/maqibg/cloudnote)
+
 当前仓库已经收口为：
 
 - **单部署模型**：Cloudflare Workers
@@ -102,6 +104,18 @@ npm run format         # prettier --write .
 - `R2`：导出与备份文件
 
 ## 部署
+
+### 一键部署
+
+直接点击顶部 `Deploy to Cloudflare` 按钮即可。
+
+按钮流程会基于仓库里的 [wrangler.toml](D:\Code\codeSpace\cloudnote\wrangler.toml) 和 [package.json](D:\Code\codeSpace\cloudnote\package.json)：
+
+- 自动创建并绑定 `D1 / KV / R2`
+- 提示填写 `ADMIN_USERNAME / ADMIN_PASSWORD / JWT_SECRET`
+- 使用当前仓库代码完成 Workers 部署
+
+如果需要手动部署，再按下面的命令执行。
 
 1. 安装依赖
 2. 配置 Cloudflare 资源绑定
