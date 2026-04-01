@@ -6,6 +6,10 @@ import { hashPassword, verifyPassword } from '../utils/crypto';
 
 const admin = new Hono<{ Bindings: Bindings }>();
 
+function normalizeSecretText(value: string): string {
+  return value.replace(/\r?\n$/, '');
+}
+
 // Admin登录页面
 admin.get('/', async (c) => {
   return c.html(getAdminLoginHTML());
@@ -19,15 +23,17 @@ admin.get('/dashboard', async (c) => {
 // Admin API - 登录
 admin.post('/api/login', async (c) => {
   const body = await c.req.json<LoginRequest>();
+  const adminUsername = normalizeSecretText(c.env.ADMIN_USERNAME);
+  const adminPassword = normalizeSecretText(c.env.ADMIN_PASSWORD);
   
-  if (body.username !== c.env.ADMIN_USERNAME) {
+  if (body.username !== adminUsername) {
     return c.json({ error: 'Invalid credentials' }, 401);
   }
   
-  const validPassword = await verifyPassword(body.password, c.env.ADMIN_PASSWORD);
+  const validPassword = await verifyPassword(body.password, adminPassword);
   if (!validPassword) {
     // 如果是明文密码比较（初始设置）
-    if (body.password === c.env.ADMIN_PASSWORD) {
+    if (body.password === adminPassword) {
       // 生成token
       const duration = parseInt(c.env.SESSION_DURATION || '86400');
       const token = await createJWT(c.env.JWT_SECRET, body.username, duration);

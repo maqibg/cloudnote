@@ -245,9 +245,7 @@ api.delete('/note/:path/lock', async (c) => {
 
 // 生成新路径
 api.get('/generate-path', async (c) => {
-  const minLength = parseInt(c.env.PATH_MIN_LENGTH || '1');
-  const maxLength = parseInt(c.env.PATH_MAX_LENGTH || '4');
-  const length = Math.floor(Math.random() * (maxLength - minLength + 1)) + minLength;
+  const length = parseInt(c.env.PATH_DEFAULT_LENGTH || '4');
   
   let attempts = 0;
   let path: string;

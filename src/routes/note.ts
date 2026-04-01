@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import type { Bindings } from '../types';
+import { QUILL_SNOW_CSS } from '../vendor/quillSnowCss';
 
 const notes = new Hono<{ Bindings: Bindings }>();
 
@@ -19,9 +20,7 @@ notes.get('/', async (c) => {
     }
     
     // 生成新路径
-    const minLength = parseInt(c.env.PATH_MIN_LENGTH || '1');
-    const maxLength = parseInt(c.env.PATH_MAX_LENGTH || '4');
-    const length = Math.floor(Math.random() * (maxLength - minLength + 1)) + minLength;
+    const length = parseInt(c.env.PATH_DEFAULT_LENGTH || '4');
     
     const { generateRandomPath } = await import('../utils/crypto');
     
@@ -76,7 +75,7 @@ function getNoteEditorHTML(path: string): string {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${path} - CloudNote</title>
-  <link href="https://cdn.quilljs.com/1.3.6/quill.snow.css" rel="stylesheet">
+  <style>${QUILL_SNOW_CSS}</style>
   <style>
     /* CSS变量 - 设计系统 */
     :root {
@@ -917,7 +916,7 @@ function getNoteEditorHTML(path: string): string {
     </div>
   </div>
   
-  <script src="https://cdn.quilljs.com/1.3.6/quill.js"></script>
+  <script src="/static/quill.js"></script>
   <script>
     const notePath = '${path}';
     let quill;
@@ -927,6 +926,98 @@ function getNoteEditorHTML(path: string): string {
     let saveTimeout;
     let viewCount = 0;
     let lastSavedTime = null;
+
+    function configureEditorSurface() {
+      if (!quill || !quill.root) {
+        return;
+      }
+
+      quill.root.spellcheck = false;
+      quill.root.setAttribute('spellcheck', 'false');
+      quill.root.setAttribute('autocorrect', 'off');
+      quill.root.setAttribute('autocapitalize', 'off');
+      quill.root.setAttribute('autocomplete', 'off');
+      quill.root.setAttribute('data-gramm', 'false');
+      quill.root.setAttribute('data-gramm_editor', 'false');
+      quill.root.setAttribute('data-enable-grammarly', 'false');
+    }
+
+    function setToolbarTooltip(element, title) {
+      if (!element) {
+        return;
+      }
+
+      element.setAttribute('title', title);
+      element.setAttribute('aria-label', title);
+    }
+
+    function enhanceToolbarAccessibility() {
+      const toolbar = document.querySelector('.ql-toolbar');
+      if (!toolbar) {
+        return;
+      }
+
+      const controls = [
+        ['button.ql-bold', '加粗'],
+        ['button.ql-italic', '斜体'],
+        ['button.ql-underline', '下划线'],
+        ['button.ql-strike', '删除线'],
+        ['button.ql-blockquote', '引用'],
+        ['button.ql-code-block', '代码块'],
+        ['button.ql-list[value="ordered"]', '有序列表'],
+        ['button.ql-list[value="bullet"]', '无序列表'],
+        ['button.ql-script[value="sub"]', '下标'],
+        ['button.ql-script[value="super"]', '上标'],
+        ['button.ql-indent[value="-1"]', '减少缩进'],
+        ['button.ql-indent[value="+1"]', '增加缩进'],
+        ['button.ql-link', '插入链接'],
+        ['button.ql-image', '插入图片'],
+        ['button.ql-clean', '清除格式'],
+        ['.ql-picker.ql-header .ql-picker-label', '标题级别'],
+        ['.ql-picker.ql-color .ql-picker-label', '文字颜色'],
+        ['.ql-picker.ql-background .ql-picker-label', '背景颜色'],
+        ['.ql-picker.ql-align .ql-picker-label', '对齐方式']
+      ];
+
+      controls.forEach(([selector, title]) => {
+        toolbar.querySelectorAll(selector).forEach((element) => {
+          setToolbarTooltip(element, title);
+        });
+      });
+
+      const headerTitles = {
+        '1': '标题 1',
+        '2': '标题 2',
+        '3': '标题 3',
+        '4': '标题 4',
+        '5': '标题 5',
+        '6': '标题 6'
+      };
+
+      toolbar.querySelectorAll('.ql-picker.ql-header .ql-picker-item').forEach((item) => {
+        const value = item.getAttribute('data-value');
+        const title = value ? '设为' + (headerTitles[value] || ('标题 ' + value)) : '设为正文';
+        setToolbarTooltip(item, title);
+      });
+
+      const alignTitles = {
+        '': '左对齐',
+        'center': '居中对齐',
+        'right': '右对齐',
+        'justify': '两端对齐'
+      };
+
+      toolbar.querySelectorAll('.ql-picker.ql-align .ql-picker-item').forEach((item) => {
+        const value = item.getAttribute('data-value') || '';
+        setToolbarTooltip(item, alignTitles[value] || '对齐方式');
+      });
+
+      toolbar.querySelectorAll('.ql-picker.ql-color .ql-picker-item, .ql-picker.ql-background .ql-picker-item').forEach((item) => {
+        const value = item.getAttribute('data-value');
+        const title = value ? ('颜色 ' + value) : '默认颜色';
+        setToolbarTooltip(item, title);
+      });
+    }
     
     // 初始化编辑器
     function initEditor(readOnly = false, hasContent = false) {
@@ -974,6 +1065,9 @@ function getNoteEditorHTML(path: string): string {
           ]
         }
       });
+
+      configureEditorSurface();
+      enhanceToolbarAccessibility();
       
       if (!readOnly) {
         // 内容变化时自动保存

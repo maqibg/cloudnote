@@ -5,6 +5,7 @@ compatibility_flags = ["nodejs_compat"]
 
 # 环境变量
 [vars]
+PATH_DEFAULT_LENGTH = "4"
 PATH_MIN_LENGTH = "1"
 PATH_MAX_LENGTH = "20"
 RATE_LIMIT_PER_MINUTE = "60"

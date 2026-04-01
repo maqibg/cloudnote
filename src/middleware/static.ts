@@ -1,4 +1,5 @@
 import { Context } from 'hono';
+import { QUILL_JS_SOURCE } from '../vendor/quillJs';
 
 export function serveStatic() {
   return async (c: Context) => {
@@ -16,6 +17,13 @@ export function serveStatic() {
     if (path === '/static/style.css') {
       return c.text(getStyleCSS(), 200, {
         'Content-Type': 'text/css'
+      });
+    }
+
+    if (path === '/static/quill.js') {
+      return c.body(QUILL_JS_SOURCE, 200, {
+        'Content-Type': 'application/javascript; charset=utf-8',
+        'Cache-Control': 'public, max-age=86400'
       });
     }
     

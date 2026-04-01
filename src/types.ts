@@ -5,6 +5,7 @@ export interface Bindings {
   ADMIN_USERNAME: string;
   ADMIN_PASSWORD: string;
   JWT_SECRET: string;
+  PATH_DEFAULT_LENGTH: string;
   PATH_MIN_LENGTH: string;
   PATH_MAX_LENGTH: string;
   RATE_LIMIT_PER_MINUTE: string;
